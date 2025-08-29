@@ -503,13 +503,11 @@ buttons = [
 
 reply_markup = InlineKeyboardMarkup(buttons)
 
-    await callback_query.message.edit_caption(
-        caption=caption,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
-
-
+await callback_query.message.edit_caption(
+    caption=caption,
+    parse_mode=ParseMode.MARKDOWN,
+    reply_markup=reply_markup
+)
 
 @bot.on_callback_query(filters.regex("^show_help$"))
 async def show_help_callback(_, callback_query):

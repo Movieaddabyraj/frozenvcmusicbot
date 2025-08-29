@@ -375,62 +375,54 @@ async def start_handler(_, message):
     help_text = to_bold_unicode("Help")
 
     caption = (
-    f"👋 нєу {user_link} 💠, 🥀\n\n"
-    f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔𝐩𝐭𝐢𝐦𝐞 ⚡\n"
-    "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
-    "   • YouTube 🎥\n"
-    "   • Spotify 🎵\n"
-    "   • Resso 🎶\n"
-    "   • Apple Music 🍎\n"
-    "   • SoundCloud ☁️\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "✨ 𝐒𝐦𝐚𝐫𝐭 𝐀𝐮𝐭𝐨-𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧𝐬 𝙬𝙝𝙚𝙣 𝐪𝐮𝐞𝐮𝐞 𝐞𝐧𝐝𝐬 🔄\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "🛠️ 𝐀𝐝𝐦𝐢𝐧 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬:\n"
-    "   ▸ Pause ⏸️ | Resume ▶️ | Skip ⏭️\n"
-    "   ▸ Stop ⏹️ | Mute 🔇 | Unmute 🔊\n"
-    "   ▸ Tmute ⏲️ | Kick 👢 | Ban 🚫 | Unban ✅\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "❤️ 𝐂𝐨𝐮𝐩𝐥𝐞 𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧 💕\n"
-    "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
+        f"👋 нєу {user_link} 💠, 🥀\n\n"
+        f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔𝐩𝐭𝐢𝐦𝐞 ⚡\n"
+        "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
+        "   • YouTube 🎥\n"
+        "   • Spotify 🎵\n"
+        "   • Resso 🎶\n"
+        "   • Apple Music 🍎\n"
+        "   • SoundCloud ☁️\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "✨ 𝐒𝐦𝐚𝐫𝐭 𝐀𝐮𝐭𝐨-𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧𝐬 𝙬𝙝𝙚𝙣 𝐪𝐮𝐞𝐮𝐞 𝐞𝐧𝐝𝐬 🔄\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🛠️ 𝐀𝐝𝐦𝐢𝐧 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬:\n"
+        "   ▸ Pause ⏸️ | Resume ▶️ | Skip ⏭️\n"
+        "   ▸ Stop ⏹️ | Mute 🔇 | Unmute 🔊\n"
+        "   ▸ Tmute ⏲️ | Kick 👢 | Ban 🚫 | Unban ✅\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "❤️ 𝐂𝐨𝐮𝐩𝐥𝐞 𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧 💕\n"
+        "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
-    
-buttons = [
-    [
-        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
-    ],
-    [
-        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/teamrajweb")
-    ],
-    [
-        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton("📢 {updates_text}", url="https://t.me/RAJCOMMITMENTBOT")
-    ],
-    [
-        InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
-        InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
+
+    buttons = [
+        [
+            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+            InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
+        ],
+        [
+            InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
+            InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
+        ],
+        [
+            InlineKeyboardButton("👑 Owner", url="https://t.me/teamrajweb"),
+            InlineKeyboardButton("⚡ Earning Zone", url="https://t.me/RAJCOMMITMENTBOT")
+        ]
     ]
-]
+    reply_markup = InlineKeyboardMarkup(buttons)
 
-reply_markup = InlineKeyboardMarkup(buttons)
-
-# Edit caption
-
-
-await callback_query.message.edit_caption(
+    await message.reply_animation(
+        animation="https://filehosting.kustbotsweb.workers.dev/tfq.mp4",
         caption=caption,
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
     )
-
 # Register chat ID for broadcasting silently
 chat_id = callback_query.message.chat.id      # ✅ Fix
 chat_type = callback_query.message.chat.type  # ✅ Fix

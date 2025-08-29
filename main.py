@@ -424,6 +424,7 @@ buttons = [
 
 reply_markup = InlineKeyboardMarkup(buttons)
 
+# Edit caption
 await callback_query.message.edit_caption(
     caption=caption,
     parse_mode="Markdown",   # ✅ Safe
@@ -431,15 +432,15 @@ await callback_query.message.edit_caption(
 )
 
 # Register chat ID for broadcasting silently
-chat_id = message.chat.id
-chat_type = message.chat.type
+chat_id = callback_query.message.chat.id      # ✅ Fix
+chat_type = callback_query.message.chat.type  # ✅ Fix
 if chat_type == ChatType.PRIVATE:
     if not broadcast_collection.find_one({"chat_id": chat_id}):
         broadcast_collection.insert_one({"chat_id": chat_id, "type": "private"})
 elif chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
     if not broadcast_collection.find_one({"chat_id": chat_id}):
         broadcast_collection.insert_one({"chat_id": chat_id, "type": "group"})
-
+        
 @bot.on_callback_query(filters.regex("^go_back$"))
 async def go_back_callback(_, callback_query):
     user_id = callback_query.from_user.id

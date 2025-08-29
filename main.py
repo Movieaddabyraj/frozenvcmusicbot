@@ -400,9 +400,7 @@ async def start_handler(_, message):
     "━━━━━━━━━━━━━━━━━━━\n"
     f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
-    OWNER = "TEAM RAJ WEB"  # Apna naam/Channel name dal do
-EARNING_ZONE = "EARNING ZONE"  # Apna naam/Channel name dal do
-
+    
 buttons = [
     [
         InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
@@ -410,11 +408,11 @@ buttons = [
     ],
     [
         InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
+        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/teamrajweb")
     ],
     [
         InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton("📢 EARNING ZONE", url="https://t.me/RAJCOMMITMENTBOT")
+        InlineKeyboardButton("📢 {updates_text}", url="https://t.me/RAJCOMMITMENTBOT")
     ],
     [
         InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
@@ -425,12 +423,13 @@ buttons = [
 reply_markup = InlineKeyboardMarkup(buttons)
 
 # Edit caption
+
+
 await callback_query.message.edit_caption(
     caption=caption,
-    parse_mode="Markdown",
+    parse_mode="Markdown",   # ✅ Safe
     reply_markup=reply_markup
 )
-
 # Register chat ID for broadcasting silently
 chat_id = callback_query.message.chat.id      # ✅ Fix
 chat_type = callback_query.message.chat.type  # ✅ Fix

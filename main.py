@@ -61,36 +61,23 @@ from FrozenMusic.telegram_client.startup_hooks import precheck_channels
 
 load_dotenv()
 
-
+# --- Configuration ---
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 ASSISTANT_SESSION = os.environ.get("ASSISTANT_SESSION")
 OWNER_ID = int(os.getenv("OWNER_ID", "5268762773"))
+WELCOME_STICKER_ID = os.getenv("WELCOME_STICKER_ID", "CAACAgUAAxkBAAPXZo8U9yVvX4Vf6c4J_p1Z1l0lUq0AAmMAA5E1sVd9eY1E_Kk7PzQE")
 
-# ——— Monkey-patch resolve_peer ——————————————
+
+# --- Logging and Error Handling ---
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
-_original_resolve_peer = Client.resolve_peer
-async def _safe_resolve_peer(self, peer_id):
-    try:
-        return await _original_resolve_peer(self, peer_id)
-    except (KeyError, ValueError) as e:
-        if "ID not found" in str(e) or "Peer id invalid" in str(e):
-            return None
-        raise
-Client.resolve_peer = _safe_resolve_peer
-
-# ——— Suppress un‐retrieved task warnings —————————
 def _custom_exception_handler(loop, context):
     exc = context.get("exception")
-    if isinstance(exc, (KeyError, ValueError)) and (
-        "ID not found" in str(exc) or "Peer id invalid" in str(exc)
-    ):
+    if isinstance(exc, (KeyError, ValueError)) and ("ID not found" in str(exc) or "Peer id invalid" in str(exc)):
         return  
-
     if isinstance(exc, AttributeError) and "has no attribute 'write'" in str(exc):
         return
-
     loop.default_exception_handler(context)
 
 asyncio.get_event_loop().set_exception_handler(_custom_exception_handler)
@@ -100,23 +87,19 @@ bot = Client(session_name, bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH
 assistant = Client("assistant_account", session_string=ASSISTANT_SESSION)
 call_py = PyTgCalls(assistant)
 
-
 ASSISTANT_USERNAME = None
 ASSISTANT_CHAT_ID = None
 API_ASSISTANT_USERNAME = os.getenv("API_ASSISTANT_USERNAME")
+BACKUP_SEARCH_API_URL = os.getenv("BACKUP_SEARCH_API_URL")
 
-
-# ─── MongoDB Setup ─────────────────────────────────────────
+# --- MongoDB Setup ---
 mongo_uri = os.environ.get("MongoDB_url")
 mongo_client = MongoClient(mongo_uri)
 db = mongo_client["music_bot"]
-
-
 broadcast_collection  = db["broadcast"]
-
-
+playlists_collection = db["playlists"]
 state_backup = db["state_backup"]
-
+welcome_db = db["welcome_settings"]
 
 chat_containers = {}
 playback_tasks = {}  
@@ -128,132 +111,56 @@ QUEUE_LIMIT = 20
 MAX_DURATION_SECONDS = 7200  
 LOCAL_VC_LIMIT = 10
 playback_mode = {}
+LOG_CHAT_ID = "@fssghjjs"
 
+async def is_admin_or_owner(client: Client, chat_id: int, user_id: int) -> bool:
+    if user_id == OWNER_ID:
+        return True
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in [ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR]:
+            return True
+        return False
+    except Exception as e:
+        print(f"Error checking admin status: {e}")
+        return False
 
-
+# --- Core Bot Functions (from previous code) ---
 async def process_pending_command(chat_id, delay):
-    await asyncio.sleep(delay)  
+    await asyncio.sleep(delay)
     if chat_id in chat_pending_commands:
         message, cooldown_reply = chat_pending_commands.pop(chat_id)
-        await cooldown_reply.delete()  
-        await play_handler(bot, message) 
-
-
-
-async def skip_to_next_song(chat_id, message):
-    """Skips to the next song in the queue and starts playback."""
-    if chat_id not in chat_containers or not chat_containers[chat_id]:
-        await message.edit("❌ No more songs in the queue.")
-        await leave_voice_chat(chat_id)
-        return
-
-    await message.edit("⏭ Skipping to the next song...")
-
-    # Pick next song from queue
-    next_song_info = chat_containers[chat_id][0]
-    try:
-        await fallback_local_playback(chat_id, message, next_song_info)
-    except Exception as e:
-        print(f"Error starting next local playback: {e}")
-        await bot.send_message(chat_id, f"❌ Failed to start next song: {e}")
-
-
-
-def safe_handler(func):
-    async def wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-        except Exception as e:
-            # Attempt to extract a chat ID (if available)
-            chat_id = "Unknown"
+        if cooldown_reply:
             try:
-                # If your function is a message handler, the second argument is typically the Message object.
-                if len(args) >= 2:
-                    chat_id = args[1].chat.id
-                elif "message" in kwargs:
-                    chat_id = kwargs["message"].chat.id
-            except Exception:
-                chat_id = "Unknown"
-            error_text = (
-                f"Error in handler `{func.__name__}` (chat id: {chat_id}):\n\n{str(e)}"
-            )
-            print(error_text)
-            # Log the error to support
-            await bot.send_message(5268762773, error_text)
-    return wrapper
+                await cooldown_reply.delete()
+            except RPCError:
+                pass
+        await play_handler(bot, message)
 
+async def clean_chat_resources(chat_id: int):
+    if chat_id in playback_tasks:
+        try:
+            playback_tasks[chat_id].cancel()
+        except Exception:
+            pass
+        del playback_tasks[chat_id]
+    if chat_id in chat_containers:
+        for song in chat_containers[chat_id]:
+            try:
+                if song.get('file_path'):
+                    os.remove(song['file_path'])
+            except Exception as e:
+                print(f"Error deleting file for chat {chat_id}: {e}")
+        del chat_containers[chat_id]
+    chat_last_command.pop(chat_id, None)
+    chat_pending_commands.pop(chat_id, None)
+    playback_mode.pop(chat_id, None)
 
-async def extract_invite_link(client, chat_id):
+async def safe_leave_call(chat_id: int):
     try:
-        chat_info = await client.get_chat(chat_id)
-        if chat_info.invite_link:
-            return chat_info.invite_link
-        elif chat_info.username:
-            return f"https://t.me/{chat_info.username}"
-        return None
-    except ValueError as e:
-        if "Peer id invalid" in str(e):
-            print(f"Invalid peer ID for chat {chat_id}. Skipping invite link extraction.")
-            return None
-        else:
-            raise e  # re-raise if it's another ValueError
+        await call_py.leave_call(chat_id)
     except Exception as e:
-        print(f"Error extracting invite link for chat {chat_id}: {e}")
-        return None
-
-async def extract_target_user(message: Message):
-    # If the moderator replied to someone:
-    if message.reply_to_message:
-        return message.reply_to_message.from_user.id
-
-    # Otherwise expect an argument like "/ban @user" or "/ban 123456"
-    parts = message.text.split()
-    if len(parts) < 2:
-        await message.reply("❌ You must reply to a user or specify their @username/user_id.")
-        return None
-
-    target = parts[1]
-    # Strip @
-    if target.startswith("@"):
-        target = target[1:]
-    try:
-        user = await message._client.get_users(target)
-        return user.id
-    except:
-        await message.reply("❌ Could not find that user.")
-        return None
-
-
-
-async def is_assistant_in_chat(chat_id):
-    try:
-        member = await assistant.get_chat_member(chat_id, ASSISTANT_USERNAME)
-        return member.status is not None
-    except Exception as e:
-        error_message = str(e)
-        if "USER_BANNED" in error_message or "Banned" in error_message:
-            return "banned"
-        elif "USER_NOT_PARTICIPANT" in error_message or "Chat not found" in error_message:
-            return False
-        print(f"Error checking assistant in chat: {e}")
-        return False
-
-async def is_api_assistant_in_chat(chat_id):
-    try:
-        member = await bot.get_chat_member(chat_id, API_ASSISTANT_USERNAME)
-        return member.status is not None
-    except Exception as e:
-        print(f"Error checking API assistant in chat: {e}")
-        return False
-    
-def iso8601_to_seconds(iso_duration):
-    try:
-        duration = isodate.parse_duration(iso_duration)
-        return int(duration.total_seconds())
-    except Exception as e:
-        print(f"Error parsing duration: {e}")
-        return 0
-
+        print(f"Error leaving the voice chat: {e}")
 
 def iso8601_to_human_readable(iso_duration):
     try:
@@ -274,27 +181,22 @@ async def fetch_youtube_link(query):
             async with session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
-                    # Check if the API response contains a playlist
                     if "playlist" in data:
                         return data
-                    else:
-                        return (
-                            data.get("link"),
-                            data.get("title"),
-                            data.get("duration"),
-                            data.get("thumbnail")
-                        )
+                    return (
+                        data.get("link"),
+                        data.get("title"),
+                        data.get("duration"),
+                        data.get("thumbnail")
+                    )
                 else:
                     raise Exception(f"API returned status code {response.status}")
     except Exception as e:
         raise Exception(f"Failed to fetch YouTube link: {str(e)}")
 
-
-    
 async def fetch_youtube_link_backup(query):
     if not BACKUP_SEARCH_API_URL:
         raise Exception("Backup Search API URL not configured")
-    # Build the correct URL:
     backup_url = (
         f"{BACKUP_SEARCH_API_URL.rstrip('/')}"
         f"/search?title={urllib.parse.quote(query)}"
@@ -305,7 +207,6 @@ async def fetch_youtube_link_backup(query):
                 if resp.status != 200:
                     raise Exception(f"Backup API returned status {resp.status}")
                 data = await resp.json()
-                # Mirror primary API’s return:
                 if "playlist" in data:
                     return data
                 return (
@@ -316,41 +217,23 @@ async def fetch_youtube_link_backup(query):
                 )
     except Exception as e:
         raise Exception(f"Backup Search API error: {e}")
-    
+
 BOT_NAME = os.environ.get("BOT_NAME", "Frozen Music")
 BOT_LINK = os.environ.get("BOT_LINK", "https://t.me/vcmusiclubot")
 
-from pyrogram.errors import UserAlreadyParticipant, RPCError
-
-async def invite_assistant(chat_id, invite_link, processing_message):
-    """
-    Internally invite the assistant to the chat by using the assistant client to join the chat.
-    If the assistant is already in the chat, treat as success.
-    On other errors, display and return False.
-    """
+async def is_assistant_in_chat(chat_id):
     try:
-        # Attempt to join via invite link
-        await assistant.join_chat(invite_link)
-        return True
-
-    except UserAlreadyParticipant:
-        # Assistant is already in the chat, no further action needed
-        return True
-
-    except RPCError as e:
-        # Handle other Pyrogram RPC errors
-        error_message = f"❌ Error while inviting assistant: Telegram says: {e.code} {e.error_message}"
-        await processing_message.edit(error_message)
-        return False
-
+        member = await assistant.get_chat_member(chat_id, ASSISTANT_USERNAME)
+        return member.status is not None
     except Exception as e:
-        # Catch-all for any unexpected exceptions
-        error_message = f"❌ Unexpected error while inviting assistant: {str(e)}"
-        await processing_message.edit(error_message)
+        error_message = str(e)
+        if "USER_BANNED" in error_message or "Banned" in error_message:
+            return "banned"
+        elif "USER_NOT_PARTICIPANT" in error_message or "Chat not found" in error_message:
+            return False
+        print(f"Error checking assistant in chat: {e}")
         return False
 
-
-# Helper to convert ASCII letters to Unicode bold
 def to_bold_unicode(text: str) -> str:
     bold_text = ""
     for char in text:
@@ -362,8 +245,38 @@ def to_bold_unicode(text: str) -> str:
             bold_text += char
     return bold_text
 
+@bot.on_message(filters.new_chat_members)
+async def welcome_handler(_, message: Message):
+    for member in message.new_chat_members:
+        if member.is_bot:
+            continue
+
+        chat_id = message.chat.id
+        chat_name = message.chat.title
+        user_name = member.first_name
+
+        welcome_settings = welcome_db.find_one({"chat_id": chat_id})
+        custom_message = welcome_settings.get("message") if welcome_settings else None
+        custom_sticker = welcome_settings.get("sticker_id") if welcome_settings else None
+
+        if custom_message:
+            welcome_text = custom_message.format(name=user_name, group_name=chat_name)
+        else:
+            welcome_text = (
+                f"🎉 Welcome, **{user_name}** to **{chat_name}**!\n"
+                f"We hope you enjoy your time here. Feel free to use my music commands like `/play`."
+            )
+
+        try:
+            sticker_id = custom_sticker or WELCOME_STICKER_ID
+            await bot.send_sticker(chat_id, sticker=sticker_id)
+        except RPCError:
+            print("Failed to send welcome sticker, falling back to text.")
+            
+        await bot.send_message(chat_id, welcome_text, parse_mode=ParseMode.MARKDOWN)
+
 @bot.on_message(filters.command("start"))
-async def start_handler(_, message):
+async def start_handler(_, message: Message):
     user_id = message.from_user.id
     raw_name = message.from_user.first_name or ""
     styled_name = to_bold_unicode(raw_name)
@@ -423,85 +336,72 @@ async def start_handler(_, message):
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
     )
-# Register chat ID for broadcasting silently
-chat_id = callback_query.message.chat.id      # ✅ Fix
-chat_type = callback_query.message.chat.type  # ✅ Fix
-if chat_type == ChatType.PRIVATE:
-    if not broadcast_collection.find_one({"chat_id": chat_id}):
-        broadcast_collection.insert_one({"chat_id": chat_id, "type": "private"})
-elif chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-    if not broadcast_collection.find_one({"chat_id": chat_id}):
-        broadcast_collection.insert_one({"chat_id": chat_id, "type": "group"})
-        
+
+    if message.chat.type == ChatType.PRIVATE:
+        if not broadcast_collection.find_one({"chat_id": user_id}):
+            broadcast_collection.insert_one({"chat_id": user_id, "type": "private"})
+    elif message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        if not broadcast_collection.find_one({"chat_id": message.chat.id}):
+            broadcast_collection.insert_one({"chat_id": message.chat.id, "type": "group"})
+
 @bot.on_callback_query(filters.regex("^go_back$"))
-async def go_back_callback(_, callback_query):
+async def go_back_callback(_, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     raw_name = callback_query.from_user.first_name or ""
     styled_name = to_bold_unicode(raw_name)
     user_link = f"[{styled_name}](tg://user?id={user_id})"
-
     add_me_text = to_bold_unicode("Add Me")
     updates_text = to_bold_unicode("Updates")
     support_text = to_bold_unicode("Support")
     help_text = to_bold_unicode("Help")
-
     caption = (
-    f"👋 нєу {user_link} 💠, 🥀\n\n"
-    f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔𝐩𝐭𝐢𝐦𝐞 ⚡\n"
-    "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
-    "   • YouTube 🎥\n"
-    "   • Spotify 🎵\n"
-    "   • Resso 🎶\n"
-    "   • Apple Music 🍎\n"
-    "   • SoundCloud ☁️\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "✨ 𝐒𝐦𝐚𝐫𝐭 𝐀𝐮𝐭𝐨-𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧𝐬 𝙬𝙝𝙚𝙣 𝐪𝐮𝐞𝐮𝐞 𝐞𝐧𝐝𝐬 🔄\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "🛠️ 𝐀𝐝𝐦𝐢𝐧 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬:\n"
-    "   ▸ Pause ⏸️ | Resume ▶️ | Skip ⏭️\n"
-    "   ▸ Stop ⏹️ | Mute 🔇 | Unmute 🔊\n"
-    "   ▸ Tmute ⏲️ | Kick 👢 | Ban 🚫 | Unban ✅\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    "❤️ 𝐂𝐨𝐮𝐩𝐥𝐞 𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧 💕\n"
-    "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
-    "━━━━━━━━━━━━━━━━━━━\n"
-    f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
-)
-
-# Custom names
-OWNER = "TEAM RAJ WEB"
-EARNING_ZONE = "EARNING ZONE"
-
-# Inline Buttons (6 total)
-buttons = [
-    [
-        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
-    ],
-    [
-        InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/teamrajweb"),
-        InlineKeyboardButton("💰 Earning Zone", url="https://t.me/RAJCOMMITMENTBOT")
-    ],
-    [
-        InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
-        InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
+        f"👋 нєу {user_link} 💠, 🥀\n\n"
+        f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔p𝐭𝐢𝐦𝐞 ⚡\n"
+        "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
+        "   • YouTube 🎥\n"
+        "   • Spotify 🎵\n"
+        "   • Resso 🎶\n"
+        "   • Apple Music 🍎\n"
+        "   • SoundCloud ☁️\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "✨ 𝐒𝐦𝐚𝐫𝐭 𝐀𝐮𝐭𝐨-𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧𝐬 𝙬𝙝𝙚𝙣 𝐪𝐮𝐞𝐮𝐞 𝐞𝐧𝐝𝐬 🔄\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "🛠️ 𝐀𝐝𝐦𝐢𝐧 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬:\n"
+        "   ▸ Pause ⏸️ | Resume ▶️ | Skip ⏭️\n"
+        "   ▸ Stop ⏹️ | Mute 🔇 | Unmute 🔊\n"
+        "   ▸ Tmute ⏲️ | Kick 👢 | Ban 🚫 | Unban ✅\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "❤️ 𝐂𝐨𝐮𝐩𝐥𝐞 𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧 💕\n"
+        "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
+    )
+    buttons = [
+        [
+            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+            InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
+        ],
+        [
+            InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
+            InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
+        ],
+        [
+            InlineKeyboardButton("👑 Owner", url="https://t.me/teamrajweb"),
+            InlineKeyboardButton("⚡ Earning Zone", url="https://t.me/RAJCOMMITMENTBOT")
+        ]
     ]
-]
-
-reply_markup = InlineKeyboardMarkup(buttons)
-
-await callback_query.message.edit_caption(
-    caption=caption,
-    parse_mode="Markdown",
-    reply_markup=reply_markup
-)
+    await callback_query.message.edit_caption(
+        caption=caption,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 @bot.on_callback_query(filters.regex("^show_help$"))
-async def show_help_callback(_, callback_query):
+async def show_help_callback(_, callback_query: CallbackQuery):
     help_text = ">📜 *Choose a category to explore commands:*"
     buttons = [
         [
@@ -519,16 +419,21 @@ async def show_help_callback(_, callback_query):
     reply_markup = InlineKeyboardMarkup(buttons)
     await callback_query.message.edit_text(help_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
 
-
 @bot.on_callback_query(filters.regex("^help_music$"))
-async def help_music_callback(_, callback_query):
+async def help_music_callback(_, callback_query: CallbackQuery):
     text = (
         ">🎵 *Music & Playback Commands*\n\n"
         ">➜ `/play <song name or URL>`\n"
         "   • Play a song (YouTube/Spotify/Resso/Apple Music/SoundCloud).\n"
         "   • If replied to an audio/video, plays it directly.\n\n"
-        ">➜ `/playlist`\n"
-        "   • View or manage your saved playlist.\n\n"
+        ">➜ `/queue`\n"
+        "   • View the current queue and jump to a song.\n\n"
+        ">➜ `/saveplaylist <name>`\n"
+        "   • Save the current queue to your personal playlist.\n\n"
+        ">➜ `/loadplaylist <name>`\n"
+        "   • Load and play a saved playlist.\n\n"
+        ">➜ `/myplaylists`\n"
+        "   • View your saved playlists.\n\n"
         ">➜ `/skip`\n"
         "   • Skip the currently playing song. (Admins only)\n\n"
         ">➜ `/pause`\n"
@@ -541,30 +446,33 @@ async def help_music_callback(_, callback_query):
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="show_help")]]
     await callback_query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(buttons))
 
-
 @bot.on_callback_query(filters.regex("^help_admin$"))
-async def help_admin_callback(_, callback_query):
+async def help_admin_callback(_, callback_query: CallbackQuery):
     text = (
         "🛡️ *Admin & Moderation Commands*\n\n"
-        ">➜ `/mute @user`\n"
-        "   • Mute a user indefinitely. (Admins only)\n\n"
-        ">➜ `/unmute @user`\n"
-        "   • Unmute a previously muted user. (Admins only)\n\n"
-        ">➜ `/tmute @user <minutes>`\n"
-        "   • Temporarily mute for a set duration. (Admins only)\n\n"
-        ">➜ `/kick @user`\n"
-        "   • Kick (ban + unban) a user immediately. (Admins only)\n\n"
-        ">➜ `/ban @user`\n"
-        "   • Ban a user. (Admins only)\n\n"
-        ">➜ `/unban @user`\n"
-        "   • Unban a previously banned user. (Admins only)"
+        ">➜ `/mute`\n"
+        "   • Mute a user indefinitely.\n\n"
+        ">➜ `/unmute`\n"
+        "   • Unmute a previously muted user.\n\n"
+        ">➜ `/tmute <time>`\n"
+        "   • Temporarily mute for a set duration. (e.g. `10m`, `2h`).\n\n"
+        ">➜ `/kick`\n"
+        "   • Kick (ban + unban) a user immediately.\n\n"
+        ">➜ `/ban`\n"
+        "   • Ban a user.\n\n"
+        ">➜ `/unban`\n"
+        "   • Unban a previously banned user.\n\n"
+        ">➜ `/welcomeset <text>`\n"
+        "   • Set a custom welcome message for new users. Use `{name}` and `{group_name}`.\n\n"
+        ">➜ `/welcomesticker`\n"
+        "   • Reply to a sticker to set it as the welcome sticker."
     )
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="show_help")]]
     await callback_query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 @bot.on_callback_query(filters.regex("^help_couple$"))
-async def help_couple_callback(_, callback_query):
+async def help_couple_callback(_, callback_query: CallbackQuery):
     text = (
         "❤️ *Couple Suggestion Command*\n\n"
         ">➜ `/couple`\n"
@@ -577,7 +485,7 @@ async def help_couple_callback(_, callback_query):
 
 
 @bot.on_callback_query(filters.regex("^help_util$"))
-async def help_util_callback(_, callback_query):
+async def help_util_callback(_, callback_query: CallbackQuery):
     text = (
         "🔍 *Utility & Extra Commands*\n\n"
         ">➜ `/ping`\n"
@@ -592,39 +500,212 @@ async def help_util_callback(_, callback_query):
     buttons = [[InlineKeyboardButton("🔙 Back", callback_data="show_help")]]
     await callback_query.message.edit_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(buttons))
 
+@bot.on_message(filters.group & filters.command("mute"))
+async def mute_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a user's message to mute them.")
+
+    target_user_id = message.reply_to_message.from_user.id
+    target_user_name = message.reply_to_message.from_user.first_name
+
+    try:
+        await bot.restrict_chat_member(
+            message.chat.id,
+            target_user_id,
+            ChatPermissions()
+        )
+        await message.reply(f"🔇 **{target_user_name}** has been muted.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to mute user: {e}")
+
+@bot.on_message(filters.group & filters.command("tmute"))
+async def tmute_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a user's message to mute them.")
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 2:
+        return await message.reply("❌ Usage: `/tmute <time>`. Example: `/tmute 10m`.")
+
+    time_str = parts[1]
+    
+    # Simple time parsing (e.g., 10m, 2h, 1d)
+    match = re.match(r"(\d+)([mhd])", time_str)
+    if not match:
+        return await message.reply("❌ Invalid time format. Use `m` for minutes, `h` for hours, `d` for days.")
+        
+    value, unit = int(match.group(1)), match.group(2)
+    if unit == 'm':
+        mute_until = datetime.now() + timedelta(minutes=value)
+    elif unit == 'h':
+        mute_until = datetime.now() + timedelta(hours=value)
+    elif unit == 'd':
+        mute_until = datetime.now() + timedelta(days=value)
+    else:
+        return await message.reply("❌ Invalid time unit. Use `m`, `h`, or `d`.")
+
+    target_user_id = message.reply_to_message.from_user.id
+    target_user_name = message.reply_to_message.from_user.first_name
+
+    try:
+        await bot.restrict_chat_member(
+            message.chat.id,
+            target_user_id,
+            ChatPermissions(can_send_messages=False),
+            until_date=mute_until
+        )
+        await message.reply(f"🔇 **{target_user_name}** has been muted for {value}{unit}.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to mute user: {e}")
+
+
+@bot.on_message(filters.group & filters.command("unmute"))
+async def unmute_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a user's message to unmute them.")
+
+    target_user_id = message.reply_to_message.from_user.id
+    target_user_name = message.reply_to_message.from_user.first_name
+
+    try:
+        await bot.restrict_chat_member(
+            message.chat.id,
+            target_user_id,
+            ChatPermissions(
+                can_send_messages=True,
+                can_send_media_messages=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+            )
+        )
+        await message.reply(f"🔊 **{target_user_name}** has been unmuted.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to unmute user: {e}")
+
+@bot.on_message(filters.group & filters.command("ban"))
+async def ban_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a user's message to ban them.")
+
+    target_user_id = message.reply_to_message.from_user.id
+    target_user_name = message.reply_to_message.from_user.first_name
+
+    try:
+        await bot.ban_chat_member(message.chat.id, target_user_id)
+        await message.reply(f"🚫 **{target_user_name}** has been banned.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to ban user: {e}")
+
+@bot.on_message(filters.group & filters.command("unban"))
+async def unban_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a user's message to unban them.")
+
+    target_user_id = message.reply_to_message.from_user.id
+    target_user_name = message.reply_to_message.from_user.first_name
+
+    try:
+        await bot.unban_chat_member(message.chat.id, target_user_id)
+        await message.reply(f"✅ **{target_user_name}** has been unbanned.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to unban user: {e}")
+
+@bot.on_message(filters.group & filters.command("kick"))
+async def kick_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a user's message to kick them.")
+
+    target_user_id = message.reply_to_message.from_user.id
+    target_user_name = message.reply_to_message.from_user.first_name
+
+    try:
+        await bot.ban_chat_member(message.chat.id, target_user_id)
+        await bot.unban_chat_member(message.chat.id, target_user_id)
+        await message.reply(f"👢 **{target_user_name}** has been kicked from the group.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to kick user: {e}")
+
+@bot.on_message(filters.group & filters.command("welcomeset"))
+async def welcomeset_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    text = message.text.split(maxsplit=1)
+    if len(text) < 2:
+        return await message.reply("❌ Please provide a custom welcome message.\nExample: `/welcomeset Welcome {name} to {group_name}!`")
+
+    custom_message = text[1].strip()
+    chat_id = message.chat.id
+
+    welcome_db.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"message": custom_message}},
+        upsert=True
+    )
+    await message.reply("✅ Welcome message has been updated!")
+
+@bot.on_message(filters.group & filters.command("welcomesticker"))
+async def welcomesticker_handler(_, message: Message):
+    if not await is_admin_or_owner(bot, message.chat.id, message.from_user.id):
+        return await message.reply("❌ You must be an admin to use this command.")
+
+    if not message.reply_to_message or not message.reply_to_message.sticker:
+        return await message.reply("❌ Reply to a sticker to set it as the welcome sticker.")
+
+    sticker_id = message.reply_to_message.sticker.file_id
+    chat_id = message.chat.id
+
+    welcome_db.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"sticker_id": sticker_id}},
+        upsert=True
+    )
+    await message.reply("✅ Welcome sticker has been updated!")
+
 
 @bot.on_message(filters.group & filters.regex(r'^/play(?:@\w+)?(?:\s+(?P<query>.+))?$'))
 async def play_handler(_, message: Message):
+    # (Existing play_handler code)
     chat_id = message.chat.id
 
-    # If replying to an audio/video message, handle local playback
     if message.reply_to_message and (message.reply_to_message.audio or message.reply_to_message.video):
         processing_message = await message.reply("❄️")
-
-        # Fetch fresh media reference and download
         orig = message.reply_to_message
-        fresh = await bot.get_messages(orig.chat.id, orig.id)
-        media = fresh.video or fresh.audio
-        if fresh.audio and getattr(fresh.audio, 'file_size', 0) > 100 * 1024 * 1024:
+        media = orig.video or orig.audio
+        if getattr(media, 'file_size', 0) > 100 * 1024 * 1024:
             await processing_message.edit("❌ Audio file too large. Maximum allowed size is 100MB.")
             return
-
         await processing_message.edit("⏳ Please wait, downloading audio…")
         try:
             file_path = await bot.download_media(media)
         except Exception as e:
             await processing_message.edit(f"❌ Failed to download media: {e}")
             return
-
-        # Download thumbnail if available
         thumb_path = None
         try:
-            thumbs = fresh.video.thumbs if fresh.video else fresh.audio.thumbs
-            thumb_path = await bot.download_media(thumbs[0])
+            thumbs = media.thumbs
+            if thumbs:
+                thumb_path = await bot.download_media(thumbs[0])
         except Exception:
             pass
-
-        # Prepare song_info and fallback to local playback
         duration = media.duration or 0
         title = getattr(media, 'file_name', 'Untitled')
         song_info = {
@@ -633,21 +714,22 @@ async def play_handler(_, message: Message):
             'duration': format_time(duration),
             'duration_seconds': duration,
             'requester': message.from_user.first_name,
-            'thumbnail': thumb_path
+            'thumbnail': thumb_path,
+            'is_local': True
         }
-        await fallback_local_playback(chat_id, processing_message, song_info)
+        chat_containers.setdefault(chat_id, []).append(song_info)
+        if len(chat_containers[chat_id]) == 1:
+            await fallback_local_playback(chat_id, processing_message, song_info)
+        else:
+            await processing_message.edit(f"✨ Added `{song_info['title']}` to the queue at position {len(chat_containers[chat_id])}")
         return
 
-    # Otherwise, process query-based search
     match = message.matches[0]
     query = (match.group('query') or "").strip()
-
     try:
         await message.delete()
-    except Exception:
+    except RPCError:
         pass
-
-    # Enforce cooldown
     now_ts = time.time()
     if chat_id in chat_last_command and (now_ts - chat_last_command[chat_id]) < COOLDOWN:
         remaining = int(COOLDOWN - (now_ts - chat_last_command[chat_id]))
@@ -659,7 +741,6 @@ async def play_handler(_, message: Message):
             asyncio.create_task(process_pending_command(chat_id, remaining))
         return
     chat_last_command[chat_id] = now_ts
-
     if not query:
         await bot.send_message(
             chat_id,
@@ -667,180 +748,191 @@ async def play_handler(_, message: Message):
             "Correct usage: /play <song name>\nExample: /play shape of you"
         )
         return
-
-    # Delegate to query processor
     await process_play_command(message, query)
-
 
 
 async def process_play_command(message: Message, query: str):
     chat_id = message.chat.id
     processing_message = await message.reply("❄️")
-
-    # --- ensure assistant is in the chat before we queue/play anything ----
     status = await is_assistant_in_chat(chat_id)
     if status == "banned":
         await processing_message.edit("❌ Assistant is banned from this chat.")
         return
     if status is False:
-        # try to fetch an invite link to add the assistant
-        invite_link = await extract_invite_link(bot, chat_id)
+        invite_link = await bot.export_chat_invite_link(chat_id)
         if not invite_link:
             await processing_message.edit("❌ Could not obtain an invite link to add the assistant.")
             return
-        invited = await invite_assistant(chat_id, invite_link, processing_message)
-        if not invited:
-            # invite_assistant handles error editing
+        try:
+            await assistant.join_chat(invite_link)
+            await processing_message.edit("✅ Assistant has joined the chat.")
+        except Exception as e:
+            await processing_message.edit(f"❌ Failed to invite assistant: {e}")
             return
-
-    # Convert short URLs to full YouTube URLs
     if "youtu.be" in query:
         m = re.search(r"youtu\.be/([^?&]+)", query)
         if m:
             query = f"https://www.youtube.com/watch?v={m.group(1)}"
-
-    # Perform YouTube search and handle results
     try:
         result = await fetch_youtube_link(query)
     except Exception as primary_err:
-        await processing_message.edit(
-            "⚠️ Primary search failed. Using backup API, this may take a few seconds…"
-        )
+        await processing_message.edit("⚠️ Primary search failed. Using backup API, this may take a few seconds…")
         try:
             result = await fetch_youtube_link_backup(query)
         except Exception as backup_err:
-            await processing_message.edit(
-                f"❌ Both search APIs failed:\n"
-                f"Primary: {primary_err}\n"
-                f"Backup:  {backup_err}"
-            )
+            await processing_message.edit(f"❌ Both search APIs failed:\nPrimary: {primary_err}\nBackup: {backup_err}")
             return
-
-    # Handle playlist vs single video
     if isinstance(result, dict) and "playlist" in result:
         playlist_items = result["playlist"]
         if not playlist_items:
             await processing_message.edit("❌ No videos found in the playlist.")
             return
-
         chat_containers.setdefault(chat_id, [])
         for item in playlist_items:
             secs = isodate.parse_duration(item["duration"]).total_seconds()
+            if secs > MAX_DURATION_SECONDS:
+                continue
             chat_containers[chat_id].append({
                 "url": item["link"],
                 "title": item["title"],
                 "duration": iso8601_to_human_readable(item["duration"]),
                 "duration_seconds": secs,
-                "requester": message.from_user.first_name if message.from_user else "Unknown",
-                "thumbnail": item["thumbnail"]
+                "requester": message.from_user.first_name,
+                "thumbnail": item["thumbnail"],
+                'is_local': False
             })
-
         total = len(playlist_items)
+        first_song_title = chat_containers[chat_id][-total]['title']
         reply_text = (
-            f"✨ Added to playlist\n"
-            f"Total songs added to queue: {total}\n"
-            f"#1 - {playlist_items[0]['title']}"
+            f"✨ Added to queue: {total} songs from playlist.\n"
+            f"**First song:** {first_song_title}"
         )
-        if total > 1:
-            reply_text += f"\n#2 - {playlist_items[1]['title']}"
         await message.reply(reply_text)
-
-        # If first playlist song, start playback
         if len(chat_containers[chat_id]) == total:
             first_song_info = chat_containers[chat_id][0]
             await fallback_local_playback(chat_id, processing_message, first_song_info)
         else:
             await processing_message.delete()
-
     else:
         video_url, title, duration_iso, thumb = result
         if not video_url:
-            await processing_message.edit(
-                "❌ Could not find the song. Try another query.\nSupport: @frozensupport1"
-            )
+            await processing_message.edit("❌ Could not find the song. Try another query.\nSupport: @frozensupport1")
             return
-
         secs = isodate.parse_duration(duration_iso).total_seconds()
         if secs > MAX_DURATION_SECONDS:
-            await processing_message.edit(
-                "❌ Streams longer than 2 hours are not allowed."
-            )
+            await processing_message.edit("❌ Streams longer than 2 hours are not allowed.")
             return
-
         readable = iso8601_to_human_readable(duration_iso)
         chat_containers.setdefault(chat_id, [])
-        chat_containers[chat_id].append({
+        song_info = {
             "url": video_url,
             "title": title,
             "duration": readable,
             "duration_seconds": secs,
-            "requester": message.from_user.first_name if message.from_user else "Unknown",
-            "thumbnail": thumb
-        })
-
-        # If it's the first song, start playback immediately using fallback
+            "requester": message.from_user.first_name,
+            "thumbnail": thumb,
+            'is_local': False
+        }
+        chat_containers[chat_id].append(song_info)
         if len(chat_containers[chat_id]) == 1:
-            await fallback_local_playback(chat_id, processing_message, chat_containers[chat_id][0])
+            await fallback_local_playback(chat_id, processing_message, song_info)
         else:
             queue_buttons = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏭ Skip", callback_data="skip"),
-                 InlineKeyboardButton("🗑 Clear", callback_data="clear")]
+                [InlineKeyboardButton("⏭ Skip", callback_data="skip"), InlineKeyboardButton("🗑 Clear", callback_data="clear")]
             ])
             await message.reply(
                 f"✨ Added to queue :\n\n"
                 f"**❍ Title ➥** {title}\n"
                 f"**❍ Time ➥** {readable}\n"
-                f"**❍ By ➥ ** {message.from_user.first_name if message.from_user else 'Unknown'}\n"
-                f"**Queue number:** {len(chat_containers[chat_id]) - 1}",
+                f"**❍ By ➥ ** {message.from_user.first_name}\n"
+                f"**Queue number:** {len(chat_containers[chat_id])}",
                 reply_markup=queue_buttons
             )
             await processing_message.delete()
 
 
-# ─── Utility functions ──────────────────────────────────────────────────────────────
+@bot.on_message(filters.group & filters.command("queue"))
+async def queue_handler(_, message: Message):
+    chat_id = message.chat.id
+    if chat_id not in chat_containers or not chat_containers[chat_id]:
+        await message.reply("❌ The queue is empty.")
+        return
+    current_song = chat_containers[chat_id][0]
+    queue_list = "\n".join([f"**{i+1}.** `{_one_line_title(song['title'])}`" for i, song in enumerate(chat_containers[chat_id])])
+    text = (
+        f"**🎧 Now Playing:**\n"
+        f"**»** `{current_song['title']}`\n\n"
+        f"**🎶 Queue ({len(chat_containers[chat_id])} songs):**\n"
+        f"{queue_list}"
+    )
+    await message.reply(text)
 
-MAX_TITLE_LEN = 20
+@bot.on_message(filters.group & filters.command("saveplaylist"))
+async def save_playlist_handler(_, message: Message):
+    if not message.reply_to_message:
+        await message.reply("❌ You must reply to a song to save a playlist.")
+        return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply("❌ Please provide a name for your playlist. Usage: `/saveplaylist <name>`")
+        return
+    playlist_name = parts[1].strip()
+    user_id = message.from_user.id
+    if user_id not in chat_containers or not chat_containers[user_id]:
+        await message.reply("❌ You do not have an active queue to save.")
+        return
+    playlist_data = chat_containers[user_id]
+    try:
+        playlists_collection.update_one(
+            {"user_id": user_id, "name": playlist_name},
+            {"$set": {"songs": playlist_data}},
+            upsert=True
+        )
+        await message.reply(f"✅ Playlist `{playlist_name}` saved with {len(playlist_data)} songs.")
+    except Exception as e:
+        await message.reply(f"❌ Failed to save playlist: {e}")
+
+@bot.on_message(filters.group & filters.command("loadplaylist"))
+async def load_playlist_handler(_, message: Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply("❌ Please provide the name of the playlist to load. Usage: `/loadplaylist <name>`")
+        return
+    playlist_name = parts[1].strip()
+    user_id = message.from_user.id
+    playlist_doc = playlists_collection.find_one({"user_id": user_id, "name": playlist_name})
+    if not playlist_doc:
+        await message.reply(f"❌ Playlist `{playlist_name}` not found.")
+        return
+    songs = playlist_doc.get("songs", [])
+    if not songs:
+        await message.reply(f"❌ Playlist `{playlist_name}` is empty.")
+        return
+    chat_id = message.chat.id
+    chat_containers[chat_id] = songs
+    await message.reply(f"✅ Loaded playlist `{playlist_name}` with {len(songs)} songs.\nPlaying the first song now...")
+    first_song_info = chat_containers[chat_id][0]
+    dummy_msg = await bot.send_message(chat_id, f"🎧 Preparing first song from playlist: **{first_song_info['title']}** ...")
+    await fallback_local_playback(chat_id, dummy_msg, first_song_info)
+
+@bot.on_message(filters.group & filters.command("myplaylists"))
+async def my_playlists_handler(_, message: Message):
+    user_id = message.from_user.id
+    playlists = list(playlists_collection.find({"user_id": user_id}))
+    if not playlists:
+        await message.reply("❌ You have no saved playlists.")
+        return
+    playlist_list = "\n".join([f"**»** `{p['name']}` ({len(p.get('songs', []))} songs)" for p in playlists])
+    await message.reply(f"**Your Saved Playlists:**\n\n{playlist_list}")
 
 def _one_line_title(full_title: str) -> str:
-    """
-    Truncate `full_title` to at most MAX_TITLE_LEN chars.
-    If truncated, append “…” so it still reads cleanly in one line.
-    """
+    MAX_TITLE_LEN = 20
     if len(full_title) <= MAX_TITLE_LEN:
         return full_title
     else:
-        return full_title[: (MAX_TITLE_LEN - 1) ] + "…"  # one char saved for the ellipsis
-
-def parse_duration_str(duration_str: str) -> int:
-    """
-    Convert a duration string to total seconds.
-    First, try ISO 8601 parsing (e.g. "PT3M9S"). If that fails,
-    fall back to colon-separated formats like "3:09" or "1:02:30".
-    """
-    try:
-        duration = isodate.parse_duration(duration_str)
-        return int(duration.total_seconds())
-    except Exception as e:
-        if ':' in duration_str:
-            try:
-                parts = [int(x) for x in duration_str.split(':')]
-                if len(parts) == 2:
-                    minutes, seconds = parts
-                    return minutes * 60 + seconds
-                elif len(parts) == 3:
-                    hours, minutes, seconds = parts
-                    return hours * 3600 + minutes * 60 + seconds
-            except Exception as e2:
-                print(f"Error parsing colon-separated duration '{duration_str}': {e2}")
-                return 0
-        else:
-            print(f"Error parsing duration '{duration_str}': {e}")
-            return 0
+        return full_title[:(MAX_TITLE_LEN - 1)] + "…"
 
 def format_time(seconds: float) -> str:
-    """
-    Given total seconds, return "H:MM:SS" or "M:SS" if hours=0.
-    """
     secs = int(seconds)
     m, s = divmod(secs, 60)
     h, m = divmod(m, 60)
@@ -850,11 +942,6 @@ def format_time(seconds: float) -> str:
         return f"{m}:{s:02d}"
 
 def get_progress_bar_styled(elapsed: float, total: float, bar_length: int = 14) -> str:
-    """
-    Build a progress bar string in the style:
-      elapsed_time  <dashes>❄️<dashes>  total_time
-    For example: 0:30 —❄️———— 3:09
-    """
     if total <= 0:
         return "Progress: N/A"
     fraction = min(elapsed / total, 1)
@@ -866,7 +953,6 @@ def get_progress_bar_styled(elapsed: float, total: float, bar_length: int = 14) 
     bar = left + "❄️" + right
     return f"{format_time(elapsed)} {bar} {format_time(total)}"
 
-
 async def update_progress_caption(
     chat_id: int,
     progress_message: Message,
@@ -874,17 +960,11 @@ async def update_progress_caption(
     total_duration: float,
     base_caption: str
 ):
-    """
-    Periodically update the inline keyboard so that the second row's button text
-    shows the current progress bar. The caption remains `base_caption`.
-    """
     while True:
         elapsed = time.time() - start_time
         if elapsed > total_duration:
             elapsed = total_duration
         progress_bar = get_progress_bar_styled(elapsed, total_duration)
-
-        # Rebuild the keyboard with updated progress bar in the second row
         control_row = [
             InlineKeyboardButton(text="▷", callback_data="pause"),
             InlineKeyboardButton(text="II", callback_data="resume"),
@@ -893,13 +973,11 @@ async def update_progress_caption(
         ]
         progress_button = InlineKeyboardButton(text=progress_bar, callback_data="progress")
         playlist_button = InlineKeyboardButton(text="➕ᴀᴅᴅ тσ ρℓαυℓιѕт➕", callback_data="add_to_playlist")
-
         new_keyboard = InlineKeyboardMarkup([
             control_row,
             [progress_button],
             [playlist_button]
         ])
-
         try:
             await bot.edit_message_caption(
                 chat_id,
@@ -908,37 +986,18 @@ async def update_progress_caption(
                 reply_markup=new_keyboard
             )
         except Exception as e:
-            # Ignore MESSAGE_NOT_MODIFIED, otherwise break
-            if "MESSAGE_NOT_MODIFIED" in str(e):
-                pass
-            else:
+            if "MESSAGE_NOT_MODIFIED" not in str(e):
                 print(f"Error updating progress caption for chat {chat_id}: {e}")
-                break
-
+            break
         if elapsed >= total_duration:
             break
-
         await asyncio.sleep(18)
-
-
-
-LOG_CHAT_ID = "@fssghjjs"
 
 async def fallback_local_playback(chat_id: int, message: Message, song_info: dict):
     playback_mode[chat_id] = "local"
     try:
-        # Cancel any existing playback task
         if chat_id in playback_tasks:
             playback_tasks[chat_id].cancel()
-
-        # Validate URL
-        video_url = song_info.get("url")
-        if not video_url:
-            print(f"Invalid video URL for song: {song_info}")
-            chat_containers[chat_id].pop(0)
-            return
-
-        # Notify
         try:
             await message.edit(f"Starting local playback for ⚡ {song_info['title']}...")
         except Exception:
@@ -946,17 +1005,19 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
                 chat_id,
                 f"Starting local playback for ⚡ {song_info['title']}..."
             )
-
-        # Download & play locally
+        video_url = song_info.get("url")
+        if not video_url:
+            await message.edit("❌ Invalid song URL.")
+            chat_containers[chat_id].pop(0)
+            return
         media_path = await vector_transport_resolver(video_url)
+        song_info['file_path'] = media_path
         await call_py.play(
             chat_id,
             MediaStream(media_path, video_flags=MediaStream.Flags.IGNORE)
         )
         playback_tasks[chat_id] = asyncio.current_task()
-
-        # Prepare caption & keyboard
-        total_duration = parse_duration_str(song_info.get("duration", "0:00"))
+        total_duration = song_info.get("duration_seconds", 0)
         one_line = _one_line_title(song_info["title"])
         base_caption = (
             "<blockquote>"
@@ -966,7 +1027,6 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
             "</blockquote>"
         )
         initial_progress = get_progress_bar_styled(0, total_duration)
-
         control_row = [
             InlineKeyboardButton(text="▷", callback_data="pause"),
             InlineKeyboardButton(text="II", callback_data="resume"),
@@ -974,21 +1034,26 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
             InlineKeyboardButton(text="▢", callback_data="stop"),
         ]
         progress_button = InlineKeyboardButton(text=initial_progress, callback_data="progress")
-        base_keyboard = InlineKeyboardMarkup([control_row, [progress_button]])
-
-        # Use raw thumbnail if available
+        playlist_button = InlineKeyboardButton(text="➕ᴀᴅᴅ тσ ρℓαυℓιѕт➕", callback_data="add_to_playlist")
+        base_keyboard = InlineKeyboardMarkup([control_row, [progress_button], [playlist_button]])
         thumb_url = song_info.get("thumbnail")
-        progress_message = await message.reply_photo(
-            photo=thumb_url,
-            caption=base_caption,
-            reply_markup=base_keyboard,
-            parse_mode=ParseMode.HTML
-        )
-
-        # Remove "processing" message
-        await message.delete()
-
-        # Kick off progress updates
+        if thumb_url:
+            progress_message = await message.reply_photo(
+                photo=thumb_url,
+                caption=base_caption,
+                reply_markup=base_keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            progress_message = await message.reply(
+                caption=base_caption,
+                reply_markup=base_keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        try:
+            await message.delete()
+        except RPCError:
+            pass
         asyncio.create_task(
             update_progress_caption(
                 chat_id,
@@ -998,8 +1063,6 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
                 base_caption
             )
         )
-
-        # Log start
         asyncio.create_task(
             bot.send_message(
                 LOG_CHAT_ID,
@@ -1010,33 +1073,24 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
                 f"• Mode: local"
             )
         )
-
     except Exception as e:
         print(f"Error during fallback local playback in chat {chat_id}: {e}")
         await bot.send_message(
             chat_id,
             f"❌ Failed to play “{song_info.get('title','Unknown')}” locally: {e}"
         )
-
         if chat_id in chat_containers and chat_containers[chat_id]:
             chat_containers[chat_id].pop(0)
 
-
-
-
 @bot.on_callback_query()
-async def callback_query_handler(client, callback_query):
+async def callback_query_handler(client, callback_query: CallbackQuery):
     chat_id = callback_query.message.chat.id
     user_id = callback_query.from_user.id
     data = callback_query.data
     user = callback_query.from_user
-
-    # Check admin
     if not await deterministic_privilege_validator(callback_query):
         await callback_query.answer("❌ You need to be an admin to use this button.", show_alert=True)
         return
-
-    # ----------------- PAUSE -----------------
     if data == "pause":
         try:
             await call_py.pause(chat_id)
@@ -1044,8 +1098,6 @@ async def callback_query_handler(client, callback_query):
             await client.send_message(chat_id, f"⏸ Playback paused by {user.first_name}.")
         except Exception as e:
             await callback_query.answer("❌ Error pausing playback.", show_alert=True)
-
-    # ----------------- RESUME -----------------
     elif data == "resume":
         try:
             await call_py.resume(chat_id)
@@ -1053,256 +1105,145 @@ async def callback_query_handler(client, callback_query):
             await client.send_message(chat_id, f"▶️ Playback resumed by {user.first_name}.")
         except Exception as e:
             await callback_query.answer("❌ Error resuming playback.", show_alert=True)
-
-    # ----------------- SKIP -----------------
     elif data == "skip":
-        if chat_id in chat_containers and chat_containers[chat_id]:
-            skipped_song = chat_containers[chat_id].pop(0)
-
-            try:
-                await call_py.leave_call(chat_id)
-            except Exception as e:
-                print("Local leave_call error:", e)
-            await asyncio.sleep(3)
-
-            try:
-                os.remove(skipped_song.get('file_path', ''))
-            except Exception as e:
-                print(f"Error deleting file: {e}")
-
-            await client.send_message(chat_id, f"⏩ {user.first_name} skipped **{skipped_song['title']}**.")
-
-            if chat_id in chat_containers and chat_containers[chat_id]:
-                await callback_query.answer("⏩ Skipped! Playing next song...")
-
-                # Play next song directly using fallback_local_playback
-                next_song_info = chat_containers[chat_id][0]
-                try:
-                    dummy_msg = await bot.send_message(chat_id, f"🎧 Preparing next song: **{next_song_info['title']}** ...")
-                    await fallback_local_playback(chat_id, dummy_msg, next_song_info)
-                except Exception as e:
-                    print(f"Error starting next local playback: {e}")
-                    await bot.send_message(chat_id, f"❌ Failed to start next song: {e}")
-
-            else:
-                await callback_query.answer("⏩ Skipped! No more songs in the queue.")
-        else:
+        if chat_id not in chat_containers or not chat_containers[chat_id]:
             await callback_query.answer("❌ No songs in the queue to skip.", show_alert=True)
-
-    # ----------------- CLEAR -----------------
-    elif data == "clear":
-        if chat_id in chat_containers:
-            for song in chat_containers[chat_id]:
-                try:
-                    os.remove(song.get('file_path', ''))
-                except Exception as e:
-                    print(f"Error deleting file: {e}")
-            chat_containers.pop(chat_id)
-            await callback_query.message.edit("🗑️ Cleared the queue.")
-            await callback_query.answer("🗑️ Cleared the queue.")
-        else:
-            await callback_query.answer("❌ No songs in the queue to clear.", show_alert=True)
-
-    # ----------------- STOP -----------------
-    elif data == "stop":
-        if chat_id in chat_containers:
-            for song in chat_containers[chat_id]:
-                try:
-                    os.remove(song.get('file_path', ''))
-                except Exception as e:
-                    print(f"Error deleting file: {e}")
-            chat_containers.pop(chat_id)
-
+            return
+        skipped_song = chat_containers[chat_id].pop(0)
+        try:
+            if skipped_song.get('file_path'):
+                os.remove(skipped_song['file_path'])
+        except Exception:
+            pass
         try:
             await call_py.leave_call(chat_id)
-            await callback_query.answer("🛑 Playback stopped and queue cleared.")
-            await client.send_message(chat_id, f"🛑 Playback stopped and queue cleared by {user.first_name}.")
-        except Exception as e:
-            print("Stop error:", e)
-            await callback_query.answer("❌ Error stopping playback.", show_alert=True)
-
-
-
-
-@call_py.on_update(fl.stream_end())
-async def stream_end_handler(_: PyTgCalls, update: StreamEnded):
-    chat_id = update.chat_id
-
-    if chat_id in chat_containers and chat_containers[chat_id]:
-        # Remove the finished song from the queue
-        skipped_song = chat_containers[chat_id].pop(0)
-        await asyncio.sleep(3)  # Delay to ensure the stream has fully ended
-
-        try:
-            os.remove(skipped_song.get('file_path', ''))
-        except Exception as e:
-            print(f"Error deleting file: {e}")
-
+        except Exception:
+            pass
+        await callback_query.answer("⏩ Skipped! Playing next song...")
+        await client.send_message(chat_id, f"⏩ {user.first_name} skipped **{skipped_song['title']}**.")
         if chat_id in chat_containers and chat_containers[chat_id]:
-            # If there are more songs, play next song directly using fallback_local_playback
             next_song_info = chat_containers[chat_id][0]
             try:
-                # Create a fake message object to pass
                 dummy_msg = await bot.send_message(chat_id, f"🎧 Preparing next song: **{next_song_info['title']}** ...")
                 await fallback_local_playback(chat_id, dummy_msg, next_song_info)
             except Exception as e:
                 print(f"Error starting next local playback: {e}")
                 await bot.send_message(chat_id, f"❌ Failed to start next song: {e}")
         else:
-            # Queue empty; leave VC
-            await leave_voice_chat(chat_id)
-            await bot.send_message(chat_id, "❌ No more songs in the queue.")
-    else:
-        # No songs in the queue
-        await leave_voice_chat(chat_id)
-        await bot.send_message(chat_id, "❌ No more songs in the queue.")
+            await safe_leave_call(chat_id)
+            await client.send_message(chat_id, "❌ No more songs in the queue.")
+    elif data == "clear":
+        await clean_chat_resources(chat_id)
+        await safe_leave_call(chat_id)
+        await callback_query.answer("🗑️ Cleared the queue.")
+        await callback_query.message.edit("🗑️ Cleared the queue.")
+    elif data == "stop":
+        await clean_chat_resources(chat_id)
+        await safe_leave_call(chat_id)
+        await callback_query.answer("🛑 Playback stopped and queue cleared.")
+        await client.send_message(chat_id, f"🛑 Playback stopped and queue cleared by {user.first_name}.")
 
-
-
-async def leave_voice_chat(chat_id):
+async def get_recommended_songs(query: str):
     try:
-        await call_py.leave_call(chat_id)
+        url = f"https://teenage-liz-frozzennbotss-61567ab4.koyeb.app/search?title={query}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("playlist", [])
     except Exception as e:
-        print(f"Error leaving the voice chat: {e}")
+        print(f"Failed to fetch recommendations: {e}")
+        return []
 
-    if chat_id in chat_containers:
-        for song in chat_containers[chat_id]:
+@call_py.on_update(fl.stream_end())
+async def stream_end_handler(_: PyTgCalls, update: StreamEnded):
+    chat_id = update.chat_id
+    if chat_id in chat_containers and chat_containers[chat_id]:
+        skipped_song = chat_containers[chat_id].pop(0)
+        try:
+            if skipped_song.get('file_path'):
+                os.remove(skipped_song['file_path'])
+        except Exception as e:
+            print(f"Error deleting file: {e}")
+        if chat_id in chat_containers and chat_containers[chat_id]:
+            next_song_info = chat_containers[chat_id][0]
             try:
-                os.remove(song.get('file_path', ''))
+                dummy_msg = await bot.send_message(chat_id, f"🎧 Preparing next song: **{next_song_info['title']}** ...")
+                await fallback_local_playback(chat_id, dummy_msg, next_song_info)
             except Exception as e:
-                print(f"Error deleting file: {e}")
-        chat_containers.pop(chat_id)
-
-    if chat_id in playback_tasks:
-        playback_tasks[chat_id].cancel()
-        del playback_tasks[chat_id]
-
-
+                print(f"Error starting next local playback: {e}")
+                await bot.send_message(chat_id, f"❌ Failed to start next song: {e}")
+        else:
+            await safe_leave_call(chat_id)
+            await bot.send_message(chat_id, "❌ No more songs in the queue.")
+            await bot.send_message(chat_id, "Queue is empty. Here are some recommendations:")
+            recommendations = await get_recommended_songs(skipped_song['title'])
+            if recommendations:
+                recommend_text = "\n".join([f"**»** `{rec['title']}`" for rec in recommendations[:5]])
+                buttons = [
+                    [InlineKeyboardButton(f"{i+1}", callback_data=f"recplay_{rec['link']}_{rec['title']}_{rec['duration']}_{rec['thumbnail']}") for i, rec in enumerate(recommendations[:5])]
+                ]
+                await bot.send_message(chat_id, f"**Top 5 Recommendations:**\n{recommend_text}", reply_markup=InlineKeyboardMarkup(buttons))
 
 @bot.on_message(filters.group & filters.command(["stop", "end"]))
-async def stop_handler(client, message):
+async def stop_handler(client, message: Message):
     chat_id = message.chat.id
-
-    # Check admin rights
     if not await deterministic_privilege_validator(message):
         await message.reply("❌ You need to be an admin to use this command.")
         return
-
-    try:
-        await call_py.leave_call(chat_id)
-    except Exception as e:
-        if "not in a call" in str(e).lower():
-            await message.reply("❌ The bot is not currently in a voice chat.")
-        else:
-            await message.reply(f"❌ An error occurred while leaving the voice chat: {str(e)}\n\nSupport: @bestshayri_raj")
-        return
-
-    # Clear the song queue
-    if chat_id in chat_containers:
-        for song in chat_containers[chat_id]:
-            try:
-                os.remove(song.get('file_path', ''))
-            except Exception as e:
-                print(f"Error deleting file: {e}")
-        chat_containers.pop(chat_id)
-
-    # Cancel any playback tasks if present
-    if chat_id in playback_tasks:
-        playback_tasks[chat_id].cancel()
-        del playback_tasks[chat_id]
-
+    await clean_chat_resources(chat_id)
+    await safe_leave_call(chat_id)
     await message.reply("⏹ Stopped the music and cleared the queue.")
 
-
-@bot.on_message(filters.command("song"))
-async def song_command_handler(_, message):
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🎶 Download Now", url="https://t.me/songdownloader1bot?start=true")]]
-    )
-    text = (
-        "ᴄʟɪᴄᴋ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴜsᴇ ᴛʜᴇ sᴏɴɢ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ. 🎵\n\n"
-        "ʏᴏᴜ ᴄᴀɴ sᴇɴᴅ ᴛʜᴇ sᴏɴɢ ɴᴀᴍᴇ ᴏʀ ᴀɴʏ ǫᴜᴇʀʏ ᴅɪʀᴇᴄᴛʟʏ ᴛᴏ ᴛʜᴇ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ, ⬇️\n\n"
-        "ᴀɴᴅ ɪᴛ ᴡɪʟʟ ғᴇᴛᴄʜ ᴀɴᴅ ᴅᴏᴡɴʟᴏᴀᴅ ᴛʜᴇ sᴏɴɢ ғᴏʀ ʏᴏᴜ. 🚀"
-    )
-    await message.reply(text, reply_markup=keyboard)
-
-
-
 @bot.on_message(filters.group & filters.command("pause"))
-async def pause_handler(client, message):
+async def pause_handler(client, message: Message):
     chat_id = message.chat.id
-
     if not await deterministic_privilege_validator(message):
         await message.reply("❌ You need to be an admin to use this command.")
         return
-
     try:
         await call_py.pause(chat_id)
         await message.reply("⏸ Paused the stream.")
     except Exception as e:
         await message.reply(f"❌ Failed to pause the stream.\nError: {str(e)}")
 
-
 @bot.on_message(filters.group & filters.command("resume"))
-async def resume_handler(client, message):
+async def resume_handler(client, message: Message):
     chat_id = message.chat.id
-
     if not await deterministic_privilege_validator(message):
         await message.reply("❌ You need to be an admin to use this command.")
         return
-
     try:
         await call_py.resume(chat_id)
         await message.reply("▶️ Resumed the stream.")
     except Exception as e:
         await message.reply(f"❌ Failed to resume the stream.\nError: {str(e)}")
 
-
-
 @bot.on_message(filters.group & filters.command("skip"))
-async def skip_handler(client, message):
+async def skip_handler(client, message: Message):
     chat_id = message.chat.id
-
     if not await deterministic_privilege_validator(message):
         await message.reply("❌ You need to be an admin to use this command.")
         return
-
     status_message = await message.reply("⏩ Skipping the current song...")
-
     if chat_id not in chat_containers or not chat_containers[chat_id]:
         await status_message.edit("❌ No songs in the queue to skip.")
         return
-
-    # Remove the current song from the queue
     skipped_song = chat_containers[chat_id].pop(0)
-
-    # Always local mode only
-    try:
-        await call_py.leave_call(chat_id)
-    except Exception as e:
-        print("Local leave_call error:", e)
-
-    await asyncio.sleep(3)
-
-    # Delete the local file if exists
     try:
         if skipped_song.get('file_path'):
             os.remove(skipped_song['file_path'])
     except Exception as e:
         print(f"Error deleting file: {e}")
-
-    # If no more songs left
+    try:
+        await call_py.leave_call(chat_id)
+    except Exception:
+        pass
     if not chat_containers.get(chat_id):
-        await status_message.edit(
-            f"⏩ Skipped **{skipped_song['title']}**.\n\n😔 No more songs in the queue."
-        )
+        await status_message.edit(f"⏩ Skipped **{skipped_song['title']}**.\n\n😔 No more songs in the queue.")
         return
-
-    # If there’s a next song, play it directly using fallback_local_playback
     next_song_info = chat_containers[chat_id][0]
-    await status_message.edit(
-        f"⏩ Skipped **{skipped_song['title']}**.\n\n💕 Playing the next song..."
-    )
+    await status_message.edit(f"⏩ Skipped **{skipped_song['title']}**.\n\n💕 Playing the next song...")
     try:
         dummy_msg = await client.send_message(chat_id, f"🎧 Preparing next song: **{next_song_info['title']}** ...")
         await fallback_local_playback(chat_id, dummy_msg, next_song_info)
@@ -1310,69 +1251,24 @@ async def skip_handler(client, message):
         print(f"Error starting next local playback: {e}")
         await client.send_message(chat_id, f"❌ Failed to start next song: {e}")
 
-
-
-
-
 @bot.on_message(filters.command("reboot"))
-async def reboot_handler(_, message):
+async def reboot_handler(_, message: Message):
     chat_id = message.chat.id
-
-    try:
-        # Remove audio files for songs in the queue for this chat.
-        if chat_id in chat_containers:
-            for song in chat_containers[chat_id]:
-                try:
-                    os.remove(song.get('file_path', ''))
-                except Exception as e:
-                    print(f"Error deleting file for chat {chat_id}: {e}")
-            # Clear the queue for this chat.
-            chat_containers.pop(chat_id, None)
-        
-        # Cancel any playback tasks for this chat.
-        if chat_id in playback_tasks:
-            playback_tasks[chat_id].cancel()
-            del playback_tasks[chat_id]
-
-        # Remove chat-specific cooldown and pending command entries.
-        chat_last_command.pop(chat_id, None)
-        chat_pending_commands.pop(chat_id, None)
-
-        # Remove playback mode for this chat.
-        playback_mode.pop(chat_id, None)
-
-        # Clear any API playback records for this chat.
-        global api_playback_records
-        api_playback_records = [record for record in api_playback_records if record.get("chat_id") != chat_id]
-
-        # Leave the voice chat for this chat.
-        try:
-            await call_py.leave_call(chat_id)
-        except Exception as e:
-            print(f"Error leaving call for chat {chat_id}: {e}")
-
-        await message.reply("♻️ Rebooted for this chat. All data for this chat has been cleared.")
-    except Exception as e:
-        await message.reply(f"❌ Failed to reboot for this chat. Error: {str(e)}\n\n support - @frozensupport1")
-
-
+    await clean_chat_resources(chat_id)
+    await safe_leave_call(chat_id)
+    await message.reply("♻️ Rebooted for this chat. All data for this chat has been cleared.")
 
 @bot.on_message(filters.command("ping"))
-async def ping_handler(_, message):
+async def ping_handler(_, message: Message):
     try:
-        # Calculate uptime
         current_time = time.time()
         uptime_seconds = int(current_time - bot_start_time)
         uptime_str = str(timedelta(seconds=uptime_seconds))
-
-        # Local system stats
         cpu_usage = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
         ram_usage = f"{memory.used // (1024 ** 2)}MB / {memory.total // (1024 ** 2)}MB ({memory.percent}%)"
         disk = psutil.disk_usage('/')
         disk_usage = f"{disk.used // (1024 ** 3)}GB / {disk.total // (1024 ** 3)}GB ({disk.percent}%)"
-
-        # Build the final message
         response = (
             f"🏓 **Pong!**\n\n"
             f"**Local Server Stats:**\n"
@@ -1381,57 +1277,40 @@ async def ping_handler(_, message):
             f"• **RAM Usage:** `{ram_usage}`\n"
             f"• **Disk Usage:** `{disk_usage}`"
         )
-
         await message.reply(response)
     except Exception as e:
         await message.reply(f"❌ Failed to execute the command.\nError: {str(e)}\n\nSupport: @bestshayri_raj")
 
-
-
-
 @bot.on_message(filters.group & filters.command("clear"))
-async def clear_handler(_, message):
+async def clear_handler(_, message: Message):
     chat_id = message.chat.id
-
+    if not await deterministic_privilege_validator(message):
+        await message.reply("❌ You need to be an admin to use this command.")
+        return
     if chat_id in chat_containers:
-        # Clear the chat-specific queue
         for song in chat_containers[chat_id]:
             try:
-                os.remove(song.get('file_path', ''))
+                if song.get('file_path'):
+                    os.remove(song['file_path'])
             except Exception as e:
                 print(f"Error deleting file: {e}")
-        
         chat_containers.pop(chat_id)
         await message.reply("🗑️ Cleared the queue.")
     else:
         await message.reply("❌ No songs in the queue to clear.")
 
-
 @bot.on_message(filters.command("broadcast") & filters.user(OWNER_ID))
-async def broadcast_handler(_, message):
-    # Ensure the command is used in reply to a message
+async def broadcast_handler(_, message: Message):
     if not message.reply_to_message:
         await message.reply("❌ Please reply to the message you want to broadcast.")
         return
-
     broadcast_message = message.reply_to_message
-
-    # Retrieve all broadcast chat IDs from the collection
     all_chats = list(broadcast_collection.find({}))
     success = 0
     failed = 0
-
-    # Loop through each chat ID and forward the message
     for chat in all_chats:
         try:
-            # Ensure the chat ID is an integer (this will handle group IDs properly)
             target_chat_id = int(chat.get("chat_id"))
-        except Exception as e:
-            print(f"Error casting chat_id: {chat.get('chat_id')} - {e}")
-            failed += 1
-            continue
-
-        try:
             await bot.forward_messages(
                 chat_id=target_chat_id,
                 from_chat_id=broadcast_message.chat.id,
@@ -1441,54 +1320,30 @@ async def broadcast_handler(_, message):
         except Exception as e:
             print(f"Failed to broadcast to {target_chat_id}: {e}")
             failed += 1
-
-        # Wait for 1 second to avoid flooding the server and Telegram
         await asyncio.sleep(1)
-
     await message.reply(f"Broadcast complete!\n✅ Success: {success}\n❌ Failed: {failed}")
 
-
-
-@bot.on_message(filters.command("frozen_check"))
-async def frozen_check_command(client: Client, message):
-    await message.reply_text("frozen check successful ✨")
-
-
-
 def save_state_to_db():
-    """
-    Persist only chat_containers (queues) into MongoDB before restart.
-    """
     data = {
         "chat_containers": { str(cid): queue for cid, queue in chat_containers.items() }
     }
-
     state_backup.replace_one(
         {"_id": "singleton"},
         {"_id": "singleton", "state": data},
         upsert=True
     )
-
     chat_containers.clear()
 
-
 def load_state_from_db():
-    """
-    Load persisted chat_containers (queues) from MongoDB on startup.
-    """
     doc = state_backup.find_one_and_delete({"_id": "singleton"})
     if not doc or "state" not in doc:
         return
-
     data = doc["state"]
-
     for cid_str, queue in data.get("chat_containers", {}).items():
         try:
             chat_containers[int(cid_str)] = queue
         except ValueError:
             continue
-
-
 
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -1513,7 +1368,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(length)
                 update = json.loads(body)
-                bot._process_update(update)
+                asyncio.run_coroutine_threadsafe(
+                    bot._process_update(update), asyncio.get_event_loop()
+                )
             except Exception as e:
                 print("Error processing update:", e)
             self.send_response(200)
@@ -1522,20 +1379,37 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-
 def run_http_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("", port), WebhookHandler)
     print(f"HTTP server running on port {port}")
     server.serve_forever()
 
-
 threading.Thread(target=run_http_server, daemon=True).start()
-
 
 logger = logging.getLogger(__name__)
 
-frozen_check_event = asyncio.Event()
+frozen_check_ok = asyncio.Event()
+
+async def frozen_check_handler(_, message: Message):
+    if message.from_user.username == ASSISTANT_USERNAME:
+        frozen_check_ok.set()
+        print("Received frozen check acknowledgment.")
+
+async def frozen_check_loop(bot_username: str):
+    while True:
+        try:
+            frozen_check_ok.clear()
+            await assistant.send_message(bot_username, "/frozen_check")
+            print(f"Sent /frozen_check to @{bot_username}")
+            try:
+                await asyncio.wait_for(frozen_check_ok.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                print("No frozen check reply within 30 seconds. Restarting bot.")
+                await restart_bot()
+        except Exception as e:
+            logger.error(f"Error in frozen_check_loop: {e}")
+        await asyncio.sleep(60)
 
 async def restart_bot():
     port = int(os.environ.get("PORT", 8080))
@@ -1550,40 +1424,31 @@ async def restart_bot():
     except Exception as e:
         logger.error(f"Error calling local restart endpoint: {e}")
 
-async def frozen_check_loop(bot_username: str):
-    while True:
-        try:
-            # 1) send the check command
-            await assistant.send_message(bot_username, "/frozen_check")
-            logger.info(f"Sent /frozen_check to @{bot_username}")
-
-            # 2) poll for a reply for up to 30 seconds
-            deadline = time.time() + 30
-            got_ok = False
-
-            while time.time() < deadline:
-                async for msg in assistant.get_chat_history(bot_username, limit=1):
-                    text = msg.text or ""
-                    if "frozen check successful ✨" in text.lower():
-                        got_ok = True
-                        logger.info("Received frozen check confirmation.")
-                        break
-                if got_ok:
-                    break
-                await asyncio.sleep(3)
-
-            # 3) if no confirmation, restart
-            if not got_ok:
-                logger.warning("No frozen check reply—restarting bot.")
-                await restart_bot()
-
-        except Exception as e:
-            logger.error(f"Error in frozen_check_loop: {e}")
-
-        await asyncio.sleep(60)
-
-
-
+@bot.on_callback_query(filters.regex("^recplay_"))
+async def recommend_play_handler(_, callback_query: CallbackQuery):
+    try:
+        data_parts = callback_query.data.split('_')
+        link = data_parts[1]
+        title = data_parts[2]
+        duration = data_parts[3]
+        thumb = data_parts[4]
+        song_info = {
+            "url": link,
+            "title": title,
+            "duration": iso8601_to_human_readable(duration),
+            "duration_seconds": isodate.parse_duration(duration).total_seconds(),
+            "requester": callback_query.from_user.first_name,
+            "thumbnail": thumb,
+            'is_local': False
+        }
+        chat_id = callback_query.message.chat.id
+        chat_containers.setdefault(chat_id, []).append(song_info)
+        await callback_query.message.edit_text(f"✨ Added `{song_info['title']}` to the queue.")
+        if len(chat_containers[chat_id]) == 1:
+            dummy_msg = await bot.send_message(chat_id, f"🎧 Preparing recommended song: **{song_info['title']}** ...")
+            await fallback_local_playback(chat_id, dummy_msg, song_info)
+    except Exception as e:
+        await callback_query.answer(f"❌ Error adding song: {e}", show_alert=True)
 
 logger = logging.getLogger(__name__)
 
@@ -1591,54 +1456,40 @@ if __name__ == "__main__":
     logger.info("Loading persisted state from MongoDB...")
     load_state_from_db()
     logger.info("State loaded successfully.")
-
     logger.info("→ Starting PyTgCalls client...")
     call_py.start()
     logger.info("PyTgCalls client started.")
-
     logger.info("→ Starting Telegram bot client (bot.start)...")
     try:
         bot.start()
     except Exception as e:
         logger.error(f"❌ Failed to start Pyrogram client: {e}")
         sys.exit(1)
-
     me = bot.get_me()
     BOT_NAME = me.first_name or "Frozen Music"
     BOT_USERNAME = me.username or os.getenv("BOT_USERNAME", "vcmusiclubot")
     BOT_LINK = f"https://t.me/{BOT_USERNAME}"
-
     logger.info(f"✅ Bot Name: {BOT_NAME!r}")
     logger.info(f"✅ Bot Username: {BOT_USERNAME}")
     logger.info(f"✅ Bot Link: {BOT_LINK}")
-
-    # start the frozen‑check loop (no handler registration needed)
     asyncio.get_event_loop().create_task(frozen_check_loop(BOT_USERNAME))
-
     if not assistant.is_connected:
         logger.info("Assistant not connected; starting assistant client...")
         assistant.run()
         logger.info("Assistant client connected.")
-
     try:
         assistant_user = assistant.get_me()
         ASSISTANT_USERNAME = assistant_user.username
         ASSISTANT_CHAT_ID = assistant_user.id
         logger.info(f"✨ Assistant Username: {ASSISTANT_USERNAME}")
         logger.info(f"💕 Assistant Chat ID: {ASSISTANT_CHAT_ID}")
-
         asyncio.get_event_loop().run_until_complete(precheck_channels(assistant))
         logger.info("✅ Assistant precheck completed.")
-
     except Exception as e:
         logger.error(f"❌ Failed to fetch assistant info: {e}")
-
     logger.info("→ Entering idle() (long-polling)")
     idle()
-
     bot.stop()
     logger.info("Bot stopped.")
     logger.info("✅ All services are up and running. Bot started successfully.")
-
-
 

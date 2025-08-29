@@ -399,28 +399,29 @@ async def start_handler(_, message):
     "━━━━━━━━━━━━━━━━━━━\n"
     f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
-    OWNER = "EARNING_ZONE"  # Apna naam/Channel name dal do
-OWNER = "OWNER"  # Apna naam/Channel name dal do
+    OWNER = "TEAM RAJ WEB"  # Apna naam/Channel name dal do
+EARNING_ZONE = "EARNING ZONE"  # Apna naam/Channel name dal do
 
-    buttons = [
-        [
-            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-            InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
-        ],
-             [
-            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-            InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
-        ],
-             [
-            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-            InlineKeyboardButton(f"📢 {EARNING_ZONE}", url="https://t.me/RAJCOMMITMENTBOT")
-             ],
-        [
-            InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
-            InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
-        ]
+buttons = [
+    [
+        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
+    ],
+    [
+        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+        InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
+    ],
+    [
+        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+        InlineKeyboardButton(f"📢 {EARNING_ZONE}", url="https://t.me/RAJCOMMITMENTBOT")
+    ],
+    [
+        InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
+        InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
     ]
-    reply_markup = InlineKeyboardMarkup(buttons)
+]
+
+reply_markup = InlineKeyboardMarkup(buttons)
 
     await message.reply_animation(
         animation="https://filehosting.kustbotsweb.workers.dev/tfq.mp4",
@@ -479,25 +480,29 @@ async def go_back_callback(_, callback_query):
     "━━━━━━━━━━━━━━━━━━━\n"
     f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
-    buttons = [
-        [
-            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-            InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/+34oz1KeknQtlYTdl")
-        ],
-        [
-            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-            InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
-        ],
-             [
-            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-            InlineKeyboardButton(f"📢 {EARNING_ZONE}", url="https://t.me/RAJCOMMITMENTBOT")
-        ],
-        [
-            InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/bestshayri_raj"),
-            InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
-        ]
+    OWNER = "TEAM RAJ WEB"  # Apna naam/Channel name dal do
+EARNING_ZONE = "EARNING ZONE"  # Apna naam/Channel name dal do
+
+buttons = [
+    [
+        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
+    ],
+    [
+        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+        InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
+    ],
+    [
+        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+        InlineKeyboardButton(f"📢 {EARNING_ZONE}", url="https://t.me/RAJCOMMITMENTBOT")
+    ],
+    [
+        InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
+        InlineKeyboardButton(f"❓ {help_text}", callback_data="show_help")
     ]
-    reply_markup = InlineKeyboardMarkup(buttons)
+]
+
+reply_markup = InlineKeyboardMarkup(buttons)
 
     await callback_query.message.edit_caption(
         caption=caption,

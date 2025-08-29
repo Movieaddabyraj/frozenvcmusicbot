@@ -427,7 +427,7 @@ reply_markup = InlineKeyboardMarkup(buttons)
 # Edit caption
 await callback_query.message.edit_caption(
     caption=caption,
-    parse_mode="Markdown",   # ✅ Safe
+    parse_mode="Markdown",
     reply_markup=reply_markup
 )
 

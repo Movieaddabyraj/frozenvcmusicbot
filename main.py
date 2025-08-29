@@ -426,10 +426,11 @@ reply_markup = InlineKeyboardMarkup(buttons)
 
 
 await callback_query.message.edit_caption(
-    caption=caption,
-    parse_mode="Markdown",   # ✅ Safe
-    reply_markup=reply_markup
-)
+        caption=caption,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
+    )
+
 # Register chat ID for broadcasting silently
 chat_id = callback_query.message.chat.id      # ✅ Fix
 chat_type = callback_query.message.chat.type  # ✅ Fix

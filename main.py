@@ -489,11 +489,11 @@ buttons = [
     ],
     [
         InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
+        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/teamrajweb")
     ],
     [
         InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton("📢 EARNING ZONE", url="https://t.me/RAJCOMMITMENTBOT")
+        InlineKeyboardButton("📢 {updates_text}", url="https://t.me/RAJCOMMITMENTBOT")
     ],
     [
         InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),

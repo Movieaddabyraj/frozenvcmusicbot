@@ -424,10 +424,9 @@ buttons = [
 
 reply_markup = InlineKeyboardMarkup(buttons)
 
-await message.reply_animation(
-    animation="https://filehosting.kustbotsweb.workers.dev/tfq.mp4",
+await callback_query.message.edit_message_caption(
     caption=caption,
-    parse_mode=ParseMode.MARKDOWN,
+    parse_mode="Markdown",
     reply_markup=reply_markup
 )
 

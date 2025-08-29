@@ -374,21 +374,44 @@ async def start_handler(_, message):
     help_text = to_bold_unicode("Help")
 
     caption = (
-        f"👋 нєу {user_link} 💠, 🥀\n\n"
-        f">🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 {BOT_NAME.upper()}! 🎵\n"
-        ">🚀 𝗧𝗢𝗣-𝗡𝗢𝗧𝗖𝗛 24×7 𝗨𝗣𝗧𝗜𝗠𝗘 & 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n"
-        ">🔊 𝗖𝗥𝗬𝗦𝗧𝗔𝗟-𝗖𝗟𝗘𝗔𝗥 𝗔𝗨𝗗𝗜𝗢\n"
-        ">🎧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧𝗘𝗗 𝗣𝗟𝗔𝗧𝗙𝗢𝗥𝗠𝗦: YouTube | Spotify | Resso | Apple Music | SoundCloud\n"
-        ">✨ 𝗔𝗨𝗧𝗢-𝗦𝗨𝗚𝗚𝗘𝗦𝗧𝗜𝗢𝗡𝗦 when queue ends\n"
-        ">🛠️ 𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦: Pause, Resume, Skip, Stop, Mute, Unmute, Tmute, Kick, Ban, Unban, Couple\n"
-        ">❤️ 𝗖𝗢𝗨𝗣𝗟𝗘 𝗦𝗨𝗚𝗚𝗘𝗦𝗧𝗜𝗢𝗡 (pick random pair in group)\n"
-        f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ."
+    f"👋 нєу {user_link} 💠, 🥀\n\n"
+    f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔𝐩𝐭𝐢𝐦𝐞 ⚡\n"
+    "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
+    "   • YouTube 🎥\n"
+    "   • Spotify 🎵\n"
+    "   • Resso 🎶\n"
+    "   • Apple Music 🍎\n"
+    "   • SoundCloud ☁️\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "✨ 𝐒𝐦𝐚𝐫𝐭 𝐀𝐮𝐭𝐨-𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧𝐬 𝙬𝙝𝙚𝙣 𝐪𝐮𝐞𝐮𝐞 𝐞𝐧𝐝𝐬 🔄\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "🛠️ 𝐀𝐝𝐦𝐢𝐧 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬:\n"
+    "   ▸ Pause ⏸️ | Resume ▶️ | Skip ⏭️\n"
+    "   ▸ Stop ⏹️ | Mute 🔇 | Unmute 🔊\n"
+    "   ▸ Tmute ⏲️ | Kick 👢 | Ban 🚫 | Unban ✅\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "❤️ 𝐂𝐨𝐮𝐩𝐥𝐞 𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧 💕\n"
+    "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
 
     buttons = [
         [
             InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
             InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
+        ],
+             [
+            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+            InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
+        ],
+             [
+            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+            InlineKeyboardButton(f"📢 {EARNING ZONE}", url="https://t.me/RAJCOMMITMENTBOT")
         ],
         [
             InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
@@ -398,7 +421,7 @@ async def start_handler(_, message):
     reply_markup = InlineKeyboardMarkup(buttons)
 
     await message.reply_animation(
-        animation="https://www.kapwing.com/videos/68b13d432ea7a42f934bb15f",
+        animation="https://filehosting.kustbotsweb.workers.dev/tfq.mp4",
         caption=caption,
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=reply_markup
@@ -429,21 +452,43 @@ async def go_back_callback(_, callback_query):
     help_text = to_bold_unicode("Help")
 
     caption = (
-        f"👋 нєу {user_link} 💠, 🥀\n\n"
-        f">🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 {BOT_NAME.upper()}! 🎵\n"
-        ">🚀 𝗧𝗢𝗣-𝗡𝗢𝗧𝗖𝗛 24×7 𝗨𝗣𝗧𝗜𝗠𝗘 & 𝗦𝗨𝗣𝗣𝗢𝗥𝗧\n"
-        ">🔊 𝗖𝗥𝗬𝗦𝗧𝗔𝗟-𝗖𝗟𝗘𝗔𝗥 𝗔𝗨𝗗𝗜𝗢\n"
-        ">🎧 𝗦𝗨𝗣𝗣𝗢𝗥𝗧𝗘𝗗 𝗣𝗟𝗔𝗧𝗙𝗢𝗥𝗠𝗦: YouTube | Spotify | Resso | Apple Music | SoundCloud\n"
-        ">✨ 𝗔𝗨𝗧𝗢-𝗦𝗨𝗚𝗚𝗘𝗦𝗧𝗜𝗢𝗡𝗦 when queue ends\n"
-        ">🛠️ 𝗔𝗗𝗠𝗜𝗡 𝗖𝗢𝗠𝗠𝗔𝗡𝗗𝗦: Pause, Resume, Skip, Stop, Mute, Unmute, Tmute, Kick, Ban, Unban, Couple\n"
-        ">❤️ 𝗖𝗢𝗨𝗣𝗟𝗘 (pick random pair in group)\n"
-        f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ."
+    f"👋 нєу {user_link} 💠, 🥀\n\n"
+    f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔𝐩𝐭𝐢𝐦𝐞 ⚡\n"
+    "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
+    "   • YouTube 🎥\n"
+    "   • Spotify 🎵\n"
+    "   • Resso 🎶\n"
+    "   • Apple Music 🍎\n"
+    "   • SoundCloud ☁️\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "✨ 𝐒𝐦𝐚𝐫𝐭 𝐀𝐮𝐭𝐨-𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧𝐬 𝙬𝙝𝙚𝙣 𝐪𝐮𝐞𝐮𝐞 𝐞𝐧𝐝𝐬 🔄\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "🛠️ 𝐀𝐝𝐦𝐢𝐧 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬:\n"
+    "   ▸ Pause ⏸️ | Resume ▶️ | Skip ⏭️\n"
+    "   ▸ Stop ⏹️ | Mute 🔇 | Unmute 🔊\n"
+    "   ▸ Tmute ⏲️ | Kick 👢 | Ban 🚫 | Unban ✅\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    "❤️ 𝐂𝐨𝐮𝐩𝐥𝐞 𝐒𝐮𝐠𝐠𝐞𝐬𝐭𝐢𝐨𝐧 💕\n"
+    "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
+    "━━━━━━━━━━━━━━━━━━━\n"
+    f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
-
     buttons = [
         [
             InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
             InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/+34oz1KeknQtlYTdl")
+        ],
+        [
+            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+            InlineKeyboardButton(f"📢 {OWNER}", url="https://t.me/teamrajweb")
+        ],
+             [
+            InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
+            InlineKeyboardButton(f"📢 {EARNING ZONE}", url="https://t.me/RAJCOMMITMENTBOT")
         ],
         [
             InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/bestshayri_raj"),

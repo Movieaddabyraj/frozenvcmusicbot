@@ -292,7 +292,7 @@ async def start_handler(_, message: Message):
         f"👋 нєу {user_link} 💠, 🥀\n\n"
         f"🎶 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 『 {BOT_NAME.upper()} 』 🎵\n"
         "━━━━━━━━━━━━━━━━━━━\n"
-        "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔𝐩𝐭𝐢𝐦𝐞 ⚡\n"
+        "🚀 𝐓𝐨𝐩-𝐍𝐨𝐭𝐜𝐡 24×7 𝐔p𝐭𝐢𝐦𝐞 ⚡\n"
         "🔊 𝐂𝐫𝐲𝐬𝐭𝐚𝐥-𝐂𝐥𝐞𝐚𝐫 𝐀𝐮𝐝𝐢𝐨 🎼\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         "🎧 𝐒𝐮𝐩𝐩𝐨𝐫𝐭𝐞𝐝 𝐏𝐥𝐚𝐭𝐟𝐨𝐫𝐦𝐬:\n"
@@ -682,6 +682,56 @@ async def welcomesticker_handler(_, message: Message):
     )
     await message.reply("✅ Welcome sticker has been updated!")
 
+# --- New `/tag` command ---
+@bot.on_message(filters.group & filters.command("tag"))
+async def tag_all_users_handler(_, message: Message):
+    if not message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        return await message.reply("❌ This command works only in groups.")
+    
+    # Check if the user is an admin
+    user_status = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    if not user_status.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+        await message.reply("❌ You must be an administrator to use this command.")
+        return
+
+    text = message.text.split(maxsplit=1)
+    tag_message = "Hi everyone! 🔔"
+    if len(text) > 1:
+        tag_message = text[1].strip()
+    
+    tagged_users_str = ""
+    async for member in bot.get_chat_members(message.chat.id):
+        if not member.user.is_bot:
+            tagged_users_str += f"[{member.user.first_name}](tg://user?id={member.user.id}) "
+    
+    if not tagged_users_str:
+        await message.reply("❌ No members to tag in this group.")
+        return
+        
+    full_message = f"**{tag_message}**\n\n{tagged_users_str}"
+    
+    # Send message in chunks to avoid message length limit
+    try:
+        # A single message can contain up to 4096 characters.
+        # Let's split it if it's too long.
+        if len(full_message) > 4096:
+            chunks = [full_message[i:i + 4000] for i in range(0, len(full_message), 4000)]
+            for chunk in chunks:
+                await bot.send_message(
+                    message.chat.id,
+                    chunk,
+                    parse_mode=ParseMode.MARKDOWN,
+                    disable_web_page_preview=True
+                )
+        else:
+            await bot.send_message(
+                message.chat.id,
+                full_message,
+                parse_mode=ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
+    except Exception as e:
+        await message.reply(f"❌ Failed to tag members: {e}")
 
 @bot.on_message(filters.group & filters.regex(r'^/play(?:@\w+)?(?:\s+(?P<query>.+))?$'))
 async def play_handler(_, message: Message):
@@ -1013,12 +1063,30 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
             await message.edit("❌ Invalid song URL.")
             chat_containers[chat_id].pop(0)
             return
-        media_path = await vector_transport_resolver(video_url)
+        
+        # New: Use a more robust download and stream method
+        try:
+            media_path = await vector_transport_resolver(video_url)
+        except Exception as e:
+            await message.edit(f"❌ Failed to download song for playback: {e}")
+            chat_containers[chat_id].pop(0)
+            return
+            
         song_info['file_path'] = media_path
-        await call_py.play(
-            chat_id,
-            MediaStream(media_path, video_flags=MediaStream.Flags.IGNORE)
-        )
+        
+        # New: Robust Voice Chat Join with Retry
+        try:
+            await call_py.join_call(chat_id, MediaStream(media_path, video_flags=MediaStream.Flags.IGNORE))
+        except Exception as e:
+            print(f"Failed to join VC, retrying... Error: {e}")
+            await asyncio.sleep(2)
+            try:
+                await call_py.join_call(chat_id, MediaStream(media_path, video_flags=MediaStream.Flags.IGNORE))
+            except Exception as e2:
+                await message.edit(f"❌ Failed to join voice chat even after retry: {e2}")
+                chat_containers[chat_id].pop(0)
+                return
+
         playback_tasks[chat_id] = asyncio.current_task()
         total_duration = song_info.get("duration_seconds", 0)
         one_line = _one_line_title(song_info["title"])
@@ -1084,6 +1152,7 @@ async def fallback_local_playback(chat_id: int, message: Message, song_info: dic
         )
         if chat_id in chat_containers and chat_containers[chat_id]:
             chat_containers[chat_id].pop(0)
+
 
 @bot.on_callback_query()
 async def callback_query_handler(client, callback_query: CallbackQuery):

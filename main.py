@@ -10,6 +10,7 @@ import tempfile
 import threading
 import subprocess
 import psutil
+from pyrogram.enums import ParseMode
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from threading import Thread

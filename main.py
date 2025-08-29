@@ -424,12 +424,12 @@ buttons = [
 
 reply_markup = InlineKeyboardMarkup(buttons)
 
-    await message.reply_animation(
-        animation="https://filehosting.kustbotsweb.workers.dev/tfq.mp4",
-        caption=caption,
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=reply_markup
-    )
+await message.reply_animation(
+    animation="https://filehosting.kustbotsweb.workers.dev/tfq.mp4",
+    caption=caption,
+    parse_mode=ParseMode.MARKDOWN,
+    reply_markup=reply_markup
+)
 
     # Register chat ID for broadcasting silently
     chat_id = message.chat.id

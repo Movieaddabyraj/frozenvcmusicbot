@@ -399,6 +399,8 @@ async def start_handler(_, message):
     "━━━━━━━━━━━━━━━━━━━\n"
     f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
     )
+    OWNER = "EARNING ZONE"  # Apna naam/Channel name dal do
+
 
     buttons = [
         [

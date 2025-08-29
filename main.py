@@ -505,7 +505,7 @@ reply_markup = InlineKeyboardMarkup(buttons)
 
 await callback_query.message.edit_caption(
     caption=caption,
-    parse_mode=ParseMode.MARKDOWN,
+    parse_mode="Markdown",
     reply_markup=reply_markup
 )
 

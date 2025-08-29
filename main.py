@@ -470,22 +470,21 @@ async def go_back_callback(_, callback_query):
     "   (ʀᴀɴᴅᴏᴍ ᴘᴀɪʀ ɪɴ ɢʀᴏᴜᴘ)\n"
     "━━━━━━━━━━━━━━━━━━━\n"
     f"๏ ᴄʟɪᴄᴋ {help_text} ʙᴇʟᴏᴡ ғᴏʀ ғᴜʟʟ ᴄᴏᴍᴍᴀɴᴅ ʟɪsᴛ 📜"
-    )
-    OWNER = "TEAM RAJ WEB"  # Apna naam/Channel name dal do
-EARNING_ZONE = "EARNING ZONE"  # Apna naam/Channel name dal do
+)
 
+# Custom names
+OWNER = "TEAM RAJ WEB"
+EARNING_ZONE = "EARNING ZONE"
+
+# Inline Buttons (6 total)
 buttons = [
     [
         InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
         InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/bestshayri_raj")
     ],
     [
-        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton(f"📢 {updates_text}", url="https://t.me/teamrajweb")
-    ],
-    [
-        InlineKeyboardButton(f"➕ {add_me_text}", url=f"{BOT_LINK}?startgroup=true"),
-        InlineKeyboardButton("📢 {updates_text}", url="https://t.me/RAJCOMMITMENTBOT")
+        InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/teamrajweb"),
+        InlineKeyboardButton("💰 Earning Zone", url="https://t.me/RAJCOMMITMENTBOT")
     ],
     [
         InlineKeyboardButton(f"💬 {support_text}", url="https://t.me/+34oz1KeknQtlYTdl"),
